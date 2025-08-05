@@ -36,6 +36,13 @@ class RetellVoceraAdapter:
         """Async handler for Vocera WebSocket connections"""
         client_id = str(uuid.uuid4())
         client = {'id': client_id, 'websocket': websocket}
+
+        # Print headers when client connects
+        print(f"New Vocera client connected: {client_id}")
+        print("Headers:")
+        for header, value in websocket.request_headers.items():
+            print(f"  {header}: {value}")
+        print("------------------------")
         
         # Store client info with proper scoping
         async with self.data_lock:
