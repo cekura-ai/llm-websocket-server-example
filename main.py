@@ -26,11 +26,13 @@ async def chat_response(message, session_id):
             "role": "user",
             "content": message
         })
-        # Get response from OpenAI with full context
+        # Run blocking sync call in a thread so the event loop stays free for ping/pong
         client = openai.OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
+        messages_snapshot = list(chat_histories[session_id])
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
             model="gpt-4o-2024-08-06",
-            messages=chat_histories[session_id],
+            messages=messages_snapshot,
             temperature=0.0,
             modalities=["text"]
         )
