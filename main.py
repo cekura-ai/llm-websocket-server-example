@@ -1,6 +1,5 @@
 import asyncio
 import json
-import aiohttp
 import websockets
 from openai import AsyncOpenAI
 
@@ -19,35 +18,6 @@ SYSTEM_PROMPT = {
     "content": """Your system prompt"""
 }
 
-# Tool definitions — add your tools here
-TOOLS = [
-    # Example:
-    # {
-    #     "type": "function",
-    #     "function": {
-    #         "name": "my_tool",
-    #         "description": "...",
-    #         "parameters": { ... }
-    #     }
-    # }
-]
-
-# Map tool names to their endpoint URLs
-TOOL_URLS = {
-    # "my_tool": "https://example.com/api/my_tool/",
-}
-
-
-async def call_tool(name: str, args: dict) -> str:
-    url = TOOL_URLS.get(name)
-    if not url:
-        return json.dumps({"error": f"Unknown tool: {name}"})
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=args) as resp:
-            result = await resp.json()
-            return json.dumps(result)
-
-
 async def chat_response(message, session_id):
     try:
         # Get or create chat history for this session
@@ -59,42 +29,19 @@ async def chat_response(message, session_id):
             "role": "user",
             "content": message
         })
+        # AsyncOpenAI is truly non-blocking — event loop stays free for ping/pong
+        response = await client.chat.completions.create(
+            model="gpt-4o-2024-08-06",
+            messages=chat_histories[session_id],
+            temperature=0.0,
+        )
 
-        # Agentic loop — keeps going until the model returns a plain text response
-        while True:
-            kwargs = dict(
-                model="gpt-4o-2024-08-06",
-                messages=chat_histories[session_id],
-                temperature=0.0,
-            )
-            if TOOLS:
-                kwargs["tools"] = TOOLS
-                kwargs["tool_choice"] = "auto"
-
-            # AsyncOpenAI is truly non-blocking — event loop stays free for ping/pong
-            response = await client.chat.completions.create(**kwargs)
-            choice = response.choices[0]
-
-            if TOOLS and choice.finish_reason == "tool_calls":
-                assistant_msg = choice.message
-                chat_histories[session_id].append(assistant_msg)
-                for tool_call in assistant_msg.tool_calls:
-                    args = json.loads(tool_call.function.arguments)
-                    print(f"Tool call: {tool_call.function.name}({args})")
-                    result = await call_tool(tool_call.function.name, args)
-                    print(f"Tool result: {result}")
-                    chat_histories[session_id].append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": result,
-                    })
-            else:
-                assistant_response = choice.message.content
-                chat_histories[session_id].append({
-                    "role": "assistant",
-                    "content": assistant_response,
-                })
-                break
+        # Add assistant's response to history
+        assistant_response = response.choices[0].message.content
+        chat_histories[session_id].append({
+            "role": "assistant",
+            "content": assistant_response
+        })
 
         # Limit context window to last 10 messages (adjust as needed)
         if len(chat_histories[session_id]) > 12:  # system prompt + 10 exchanges
@@ -105,7 +52,6 @@ async def chat_response(message, session_id):
         return json.dumps({"content": assistant_response})
     except Exception as e:
         return f"Error: {str(e)}"
-
 
 async def handle_websocket(websocket, path):
     # Generate unique session ID for this connection
@@ -130,7 +76,6 @@ async def handle_websocket(websocket, path):
             del chat_histories[session_id]
     except Exception as e:
         print(f"Error: {str(e)}")
-
 
 async def main():
     server = await websockets.serve(
