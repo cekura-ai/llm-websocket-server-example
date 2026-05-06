@@ -1,10 +1,13 @@
 import asyncio
 import json
 import websockets
-import openai
+from openai import AsyncOpenAI
 
 # Configure your OpenAI API key
 api_key = 'YOUR-OPENAI-API-KEY'
+
+# Module-level async client — reuses a single connection pool across all concurrent calls
+client = AsyncOpenAI(api_key=api_key)
 
 # Store chat histories for different connections
 chat_histories = {}
@@ -26,15 +29,11 @@ async def chat_response(message, session_id):
             "role": "user",
             "content": message
         })
-        # Run blocking sync call in a thread so the event loop stays free for ping/pong
-        client = openai.OpenAI(api_key=api_key)
-        messages_snapshot = list(chat_histories[session_id])
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
+        # AsyncOpenAI is truly non-blocking — event loop stays free for ping/pong
+        response = await client.chat.completions.create(
             model="gpt-4o-2024-08-06",
-            messages=messages_snapshot,
+            messages=chat_histories[session_id],
             temperature=0.0,
-            modalities=["text"]
         )
 
         # Add assistant's response to history
@@ -82,7 +81,8 @@ async def main():
     server = await websockets.serve(
         handle_websocket,
         "0.0.0.0",
-        8765
+        8765,
+        ping_interval=None,  # Disable server→client pings; let the client manage keepalive
     )
     print("WebSocket server started on ws://0.0.0.0:8765")
     await server.wait_closed()
